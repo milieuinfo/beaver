@@ -1,0 +1,14 @@
+# Automatically added by dh_ucf
+if [ "$1" = "purge" ]; then
+	for ext in .ucf-new .ucf-old .ucf-dist ""; do
+		rm -f "/etc/beaver.conf$ext"
+	done
+	
+	if [ -x "`which ucf 2>/dev/null`" ]; then
+		ucf --purge "/etc/beaver.conf"
+	fi
+	if [ -x "`which ucfr 2>/dev/null`" ]; then
+		ucfr --purge beaver "/etc/beaver.conf"
+	fi
+fi
+# End automatically added section

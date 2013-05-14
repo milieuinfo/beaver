@@ -1,3 +1,7 @@
+/debian/tmp 
+/debian/beaver 
+/debian/python-beaver
+
 *.pyc
 *.egg
 *.egg-info

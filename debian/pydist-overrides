@@ -1,0 +1,5 @@
+pika python-pika
+python_daemon python-daemon
+redis python-redis
+msgpack_pure msgpack-python 
+ujson python-simplejson
