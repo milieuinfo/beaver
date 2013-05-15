@@ -21,7 +21,7 @@ Description: Beaver
 Package: python-beaver
 Architecture: all
 Depends:
-    ${python:Depends}
+    ${python:Depends},
     ${misc:Depends}
 Provides:
     ${python:Provides}
