@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import collections
 import datetime
 import errno
 import gzip
@@ -58,7 +59,7 @@ class Worker(object):
             raise RuntimeError("Callback for worker is not callable")
 
         self.update_files()
-        self.seek_to_end()
+        self._seek_to_end()
 
     def __del__(self):
         """Closes all files"""
@@ -92,36 +93,117 @@ class Worker(object):
 
             self._ensure_files_are_good(current_time=t)
 
+            unwatch_list = []
+
             for fid, data in self._file_map.iteritems():
                 try:
-                    self.readfile(fid, data['file'])
+                    self._run_pass(fid, data['file'])
                 except IOError, e:
                     if e.errno == errno.ESTALE:
-                        self.unwatch(data['file'], fid)
+                        unwatch_list.append(fid)
+
+            self.unwatch_list(unwatch_list)
+
             if async:
                 return
 
             self._logger.debug("Iteration took {0:.6f}".format(time.time() - t))
             time.sleep(interval)
 
-    def readfile(self, fid, file):
+    def _run_pass(self, fid, file):
         """Read lines from a file and performs a callback against them"""
-        lines = file.readlines(4096)
         line_count = 0
-        while lines:
+        while True:
+            try:
+                data = file.read(4096)
+            except IOError, e:
+                if e.errno == errno.ESTALE:
+                    self.active = False
+                    return False
+
+            lines = self._buffer_extract(data=data, fid=fid)
+
+            if not lines:
+                break
+
+            self._callback_wrapper(filename=file.name, lines=lines)
+
             if self._sincedb_path:
                 current_line_count = len(lines)
                 if not self._sincedb_update_position(file, fid=fid, lines=current_line_count):
                     line_count += current_line_count
 
-            self._callback_wrapper(filename=file.name, lines=lines)
-
-            lines = file.readlines(4096)
-
         if line_count > 0:
             self._sincedb_update_position(file, fid=fid, lines=line_count, force_update=True)
 
-    def seek_to_end(self):
+    def _buffer_extract(self, data, fid):
+        """
+        Extract takes an arbitrary string of input data and returns an array of
+        tokenized entities, provided there were any available to extract.  This
+        makes for easy processing of datagrams using a pattern like:
+
+          tokenizer.extract(data).map { |entity| Decode(entity) }.each do ..."""
+        # Extract token-delimited entities from the input string with the split command.
+        # There's a bit of craftiness here with the -1 parameter.  Normally split would
+        # behave no differently regardless of if the token lies at the very end of the
+        # input buffer or not (i.e. a literal edge case)  Specifying -1 forces split to
+        # return "" in this case, meaning that the last entry in the list represents a
+        # new segment of data where the token has not been encountered
+        entities = collections.deque(data.split(self._file_map[fid]['delimiter'], -1))
+
+        # Check to see if the buffer has exceeded capacity, if we're imposing a limit
+        if self._file_map[fid]['size_limit']:
+            if self._file_map[fid]['input_size'] + len(entities[0]) > self._file_map[fid]['size_limit']:
+                raise Exception('input buffer full')
+            self._file_map[fid]['input_size'] += len(entities[0])
+
+        # Move the first entry in the resulting array into the input buffer.  It represents
+        # the last segment of a token-delimited entity unless it's the only entry in the list.
+        self._file_map[fid]['input'].append(entities.popleft())
+
+        # If the resulting array from the split is empty, the token was not encountered
+        # (not even at the end of the buffer).  Since we've encountered no token-delimited
+        # entities this go-around, return an empty array.
+        if len(entities) == 0:
+            return []
+
+        # At this point, we've hit a token, or potentially multiple tokens.  Now we can bring
+        # together all the data we've buffered from earlier calls without hitting a token,
+        # and add it to our list of discovered entities.
+        entities.appendleft(''.join(self._file_map[fid]['input']))
+
+        # Now that we've hit a token, joined the input buffer and added it to the entities
+        # list, we can go ahead and clear the input buffer.  All of the segments that were
+        # stored before the join can now be garbage collected.
+        self._file_map[fid]['input'].clear()
+
+        # The last entity in the list is not token delimited, however, thanks to the -1
+        # passed to split.  It represents the beginning of a new list of as-yet-untokenized
+        # data, so we add it to the start of the list.
+        self._file_map[fid]['input'].append(entities.pop())
+
+        # Set the new input buffer size, provided we're keeping track
+        if self._file_map[fid]['size_limit']:
+            self._file_map[fid]['input_size'] = len(self._file_map[fid]['input'][0])
+
+        # Now we're left with the list of extracted token-delimited entities we wanted
+        # in the first place.  Hooray!
+        return entities
+
+    # Flush the contents of the input buffer, i.e. return the input buffer even though
+    # a token has not yet been encountered
+    def _buffer_flush(self, fid):
+        buf = ''.join(self._file_map[fid]['input'])
+        self._file_map[fid]['input'].clear
+        return buf
+
+    # Is the buffer empty?
+    def _buffer_empty(self, fid):
+        return len(self._file_map[fid]['input']) > 0
+
+    def _seek_to_end(self):
+        unwatch_list = []
+
         # The first time we run the script we move all file markers at EOF.
         # In case of files created afterwards we don't do this.
         for fid, data in self._file_map.iteritems():
@@ -153,7 +235,7 @@ class Worker(object):
                         self._logger.debug("[{0}] - UnicodeDecodeError raised for {1} with encoding {2}".format(fid, data['file'].name, data['encoding']))
                         data['file'] = self.open(data['file'].name, encoding=encoding)
                         if not data['file']:
-                            self.unwatch(data['file'], fid)
+                            unwatch_list.append(fid)
                             is_active = False
                             break
 
@@ -182,7 +264,7 @@ class Worker(object):
                         self._logger.debug("[{0}] - UnicodeDecodeError raised for {1} with encoding {2}".format(fid, data['file'].name, data['encoding']))
                         data['file'] = self.open(data['file'].name, encoding=encoding)
                         if not data['file']:
-                            self.unwatch(data['file'], fid)
+                            unwatch_list.append(fid)
                             is_active = False
                             break
 
@@ -203,6 +285,8 @@ class Worker(object):
                 lines = self.tail(data['file'].name, encoding=encoding, window=tail_lines, position=current_position)
                 if lines:
                     self._callback_wrapper(filename=data['file'].name, lines=lines)
+
+        self.unwatch_list(unwatch_list)
 
     def _callback_wrapper(self, filename, lines):
         self._callback(('callback', {
@@ -344,6 +428,10 @@ class Worker(object):
     def _ensure_files_are_good(self, current_time):
         """Every N seconds, ensures that the file we are tailing is the file we expect to be tailing"""
 
+        # We cannot watch/unwatch in a single iteration
+        rewatch_list = []
+        unwatch_list = []
+
         # check existent files
         for fid, data in self._file_map.iteritems():
             filename = data['file'].name
@@ -357,14 +445,13 @@ class Worker(object):
                 st = os.stat(data['file'].name)
             except EnvironmentError, err:
                 if err.errno == errno.ENOENT:
-                    self.unwatch(data['file'], fid)
+                    unwatch_list.append(fid)
                 else:
                     raise
             else:
                 if fid != self.get_file_id(st):
                     self._logger.info("[{0}] - file rotated {1}".format(fid, data['file'].name))
-                    self.unwatch(data['file'], fid)
-                    self.watch(data['file'].name)
+                    rewatch_list.append(fid)
                 elif data['file'].tell() > st.st_size:
                     if st.st_size == 0 and self._beaver_config.get_field('ignore_truncate', data['file'].name):
                         self._logger.info("[{0}] - file size is 0 {1}. ".format(fid, data['file'].name) +
@@ -374,8 +461,7 @@ class Worker(object):
                                           "better do nothing here")
                         continue
                     self._logger.info("[{0}] - file truncated {1}".format(fid, data['file'].name))
-                    self.unwatch(data['file'], fid)
-                    self.watch(data['file'].name)
+                    rewatch_list.append(fid)
                 elif REOPEN_FILES:
                     self._logger.debug("[{0}] - file reloaded (non-linux) {1}".format(fid, data['file'].name))
                     position = data['file'].tell()
@@ -386,6 +472,27 @@ class Worker(object):
                         file.seek(position)
                         self._file_map[fid]['file'] = file
 
+        self.unwatch_list(unwatch_list)
+        self.rewatch_list(rewatch_list)
+
+    def rewatch_list(self, rewatch_list):
+        for fid in rewatch_list:
+            if fid not in self._file_map:
+                continue
+
+            f = self._file_map[fid]['file']
+            filename = f.name
+            self.unwatch(f, fid)
+            self.watch(filename)
+
+    def unwatch_list(self, unwatch_list):
+        for fid in unwatch_list:
+            if fid not in self._file_map:
+                continue
+
+            f = self._file_map[fid]['file']
+            self.unwatch(f, fid)
+
     def unwatch(self, file, fid):
         """file no longer exists; if it has been renamed
         try to read it for the last time in case the
@@ -393,7 +500,7 @@ class Worker(object):
         """
         try:
             if file:
-                self.readfile(fid, file)
+                self._run_pass(fid, file)
         except IOError:
             # Silently ignore any IOErrors -- file is gone
             pass
@@ -418,9 +525,13 @@ class Worker(object):
             if file:
                 self._logger.info("[{0}] - watching logfile {1}".format(fid, fname))
                 self._file_map[fid] = {
+                    'delimiter': self._beaver_config.get_field('delimiter', fname),
                     'encoding': self._beaver_config.get_field('encoding', fname),
                     'file': file,
+                    'input': collections.deque([]),
+                    'input_size': 0,
                     'line': 0,
+                    'size_limit': self._beaver_config.get_field('size_limit', fname),
                     'update_time': None,
                     'active': True,
                 }
