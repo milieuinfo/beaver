@@ -1,3 +1,10 @@
+beaver (28-3ACD1) precise; urgency=low
+
+  * bump to upstream 2f14f97b0c71cd83292b790639c3395c5d82d345
+  * includes fix for conf.d
+
+ -- Serge van Ginderachter <serge@vanginderachter.be>  Thu, 23 May 2013 12:16:07 +0200
+
 beaver (28-3) precise; urgency=low
 
   * Include /var/log/syslog in the sample config file
