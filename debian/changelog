@@ -1,3 +1,9 @@
+beaver (29-ACD1) precise; urgency=low
+
+  * merged upstream version 29
+
+ -- Serge van Ginderachter <serge@vanginderachter.be>  Fri, 14 Jun 2013 15:36:04 +0200
+
 beaver (28-3ACD1) precise; urgency=low
 
   * bump to upstream 2f14f97b0c71cd83292b790639c3395c5d82d345
