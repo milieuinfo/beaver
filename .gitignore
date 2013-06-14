@@ -1,6 +1,9 @@
-/debian/tmp 
-/debian/beaver 
+/debian/tmp
+/debian/beaver
 /debian/python-beaver
+/debian/*.debhelper.log
+/debian/*.substvars
+/debian/files
 
 *.pyc
 *.egg

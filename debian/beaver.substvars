@@ -1,2 +1,0 @@
-misc:Depends=ucf, upstart-job
-python:Depends=python
