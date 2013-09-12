@@ -1,5 +1,7 @@
 description "Beaver"
 
+console none
+
 start on runlevel [2345]
 stop on runlevel [!2345]
 
