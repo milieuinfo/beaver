@@ -1,3 +1,9 @@
+beaver (30-ACD1) UNRELEASED; urgency=low
+
+  * merged upstream version 30
+
+ -- Serge van Ginderachter <serge@vanginderachter.be>  Thu, 12 Sep 2013 14:03:49 +0200
+
 beaver (29-ACD1) precise; urgency=low
 
   * merged upstream version 29
