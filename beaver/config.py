@@ -31,7 +31,8 @@ class BeaverConfig():
             'ignore_truncate': '0',
 
             # buffered tokenization
-            'delimiter': "\n",
+            # we string-escape the delimiter later so that we can put escaped characters in our config file
+            'delimiter': '\n',
             'size_limit': '',
 
             'message_format': '',
@@ -68,6 +69,8 @@ class BeaverConfig():
             'sqs_aws_secret_key': '',
             'sqs_aws_region': 'us-east-1',
             'sqs_aws_queue': '',
+            'tcp_host': '127.0.0.1',
+            'tcp_port': '9999',
             'udp_host': os.environ.get('UDP_HOST', '127.0.0.1'),
             'udp_port': os.environ.get('UDP_PORT', '9999'),
             'zeromq_address': os.environ.get('ZEROMQ_ADDRESS', 'tcp://localhost:2120'),
@@ -253,6 +256,7 @@ class BeaverConfig():
                 'rabbitmq_port',
                 'respawn_delay',
                 'subprocess_poll_sleep',
+                'tcp_port',
                 'udp_port',
                 'wait_timeout',
                 'zeromq_hwm',
@@ -276,9 +280,10 @@ class BeaverConfig():
             if config['files'] is not None and type(config['files']) == str:
                 config['files'] = config['files'].split(',')
 
-            config['path'] = os.path.realpath(config['path'])
-            if not os.path.isdir(config['path']):
-                raise LookupError('{0} does not exist'.format(config['path']))
+            if config['path'] is not None:
+                config['path'] = os.path.realpath(config['path'])
+                if not os.path.isdir(config['path']):
+                    raise LookupError('{0} does not exist'.format(config['path']))
 
             if config.get('hostname') is None:
                 if config.get('fqdn') is True:
@@ -288,6 +293,9 @@ class BeaverConfig():
 
             if config.get('sincedb_path'):
                 config['sincedb_path'] = os.path.realpath(config.get('sincedb_path'))
+
+            if config['zeromq_address'] and type(config['zeromq_address']) == str:
+                config['zeromq_address'] = [x.strip() for x in config.get('zeromq_address').split(',')]
 
             config['globs'] = {}
 
@@ -349,6 +357,8 @@ class BeaverConfig():
             require_bool = ['debug', 'ignore_empty', 'ignore_truncate']
             for k in require_bool:
                 config[k] = bool(int(config[k]))
+
+            config['delimiter'] = config['delimiter'].decode('string-escape')
 
             require_int = ['sincedb_write_interval', 'stat_interval', 'tail_lines']
             for k in require_int:

@@ -1,3 +1,4 @@
+.. image:: https://secure.travis-ci.org/josegonzalez/beaver.png
 ======
 Beaver
 ======
@@ -21,23 +22,24 @@ From Github::
 
 From PyPI::
 
-    pip install beaver==29
+    pip install beaver==30
 
 Usage
 =====
 
 usage::
 
-    beaver [-h] [-c CONFIG] [-d] [-D] [-f FILES [FILES ...]]
+    beaver [-h] [-c CONFIG] [-C CONFD_PATH] [-d] [-D] [-f FILES [FILES ...]]
            [-F {json,msgpack,raw,rawjson,string}] [-H HOSTNAME] [-m {bind,connect}]
            [-l OUTPUT] [-p PATH] [-P PID]
-           [-t {mqtt,rabbitmq,redis,sqs,stdout,udp,zmq}] [-v] [--fqdn]
+           [-t {mqtt,rabbitmq,redis,sqs,stdout,tcp,udp,zmq}] [-v] [--fqdn]
 
 optional arguments::
 
     -h, --help            show this help message and exit
     -c CONFIG, --configfile CONFIG
-                          ini config file path
+                          main beaver ini config file path
+    -C CONFD_PATH         ini config directory path
     -d, --debug           enable debug mode
     -D, --daemonize       daemonize in the background
     -f FILES [FILES ...], --files FILES [FILES ...]
@@ -53,7 +55,7 @@ optional arguments::
                           file to pipe output to (in addition to stdout)
     -p PATH, --path PATH  path to log files
     -P PID, --pid PID     path to pid file
-    -t {mqtt,rabbitmq,redis,stdout,udp,zmq}, --transport {mqtt,rabbitmq,redis,sqs,stdout,udp,zmq}
+    -t {mqtt,rabbitmq,redis,stdout,tcp,udp,zmq}, --transport {mqtt,rabbitmq,redis,sqs,stdout,tcp,udp,zmq}
                           log transport method
     -v, --version         output version and quit
     --fqdn                use the machine's FQDN for source_host
@@ -61,7 +63,7 @@ optional arguments::
 Background
 ==========
 
-Beaver provides an lightweight method for shipping local log files to Logstash. It does this using redis, zeromq, udp, rabbit or stdout as the transport. This means you'll need a redis, zeromq, udp, amqp or stdin input somewhere down the road to get the events.
+Beaver provides an lightweight method for shipping local log files to Logstash. It does this using redis, zeromq, tcp, udp, rabbit or stdout as the transport. This means you'll need a redis, zeromq, tcp, udp, amqp or stdin input somewhere down the road to get the events.
 
 Events are sent in logstash's ``json_event`` format. Options can also be set as environment variables.
 
@@ -93,6 +95,8 @@ Beaver can optionally get data from a ``configfile`` using the ``-c`` flag. This
 * sqs_aws_secret_key: Can be left blank to use IAM Roles or AWS_SECRET_ACCESS_KEY environment variable (see: https://github.com/boto/boto#getting-started-with-boto)
 * sqs_aws_region: Default ``us-east-1``. AWS Region
 * sqs_aws_queue: SQS queue (must exist)
+* tcp_host: Default ``127.0.0.1``. TCP Host
+* tcp_port: Default ``9999``. TCP Port
 * udp_host: Default ``127.0.0.1``. UDP Host
 * udp_port: Default ``9999``. UDP Port
 * zeromq_address: Default ``tcp://localhost:2120``. Zeromq URL
@@ -247,11 +251,12 @@ Example 9: Read config from config.ini and put to stdout::
     tags: tag1,tag2
     add_field: fieldname1,fieldvalue1[,fieldname2,fieldvalue2, ...]
 
-    ; follow all logs in /var/log except those with `messages` or `secure` in the name
+    ; follow all logs in /var/log except those with `messages` or `secure` in the name.
+    ; The exclude tag must be a valid python regular expression.
     [/var/log/*log]
     type: syslog
     tags: sys
-    exclude: (messages,secure)
+    exclude: (messages|secure)
 
     ; follow /var/log/messages.log and /var/log/secure.log using file globbing
     [/var/log/{messages,secure}.log]
@@ -261,7 +266,27 @@ Example 9: Read config from config.ini and put to stdout::
     # From the commandline
     beaver -c /etc/beaver/conf -t stdout
 
-Example 10: UDP transport::
+Example 10: TCP transport::
+
+    # /etc/beaver/conf
+    [beaver]
+    tcp_host: 127.0.0.1
+    tcp_port: 9999
+
+    # logstash indexer config:
+    input {
+      tcp {
+        type => 'shipper-input'
+        host => '127.0.0.1'
+        port => '9999'
+      }
+    }
+    output { stdout { debug => true } }
+
+    # From the commandline
+    beaver -c /etc/beaver/conf -t tcp
+
+Example 11: UDP transport::
 
     # /etc/beaver/conf
     [beaver]
@@ -281,14 +306,14 @@ Example 10: UDP transport::
     # From the commandline
     beaver -c /etc/beaver/conf -t udp
 
-Example 11: SQS Transport::
+Example 12: SQS Transport::
 
     # /etc/beaver/conf
     [beaver]
     sqs_aws_region: us-east-1
     sqs_aws_queue: logstash-input
     sqs_aws_access_key: <access_key>
-    sqs_aws_secret_access_key: <secret_key>
+    sqs_aws_secret_key: <secret_key>
 
     # logstash indexer config:
     input {
@@ -305,11 +330,11 @@ Example 11: SQS Transport::
     # From the commandline
     beaver -c /etc/beaver/conf -t sqs
 
-Example 12: [Raw Json Support](http://blog.pkhamre.com/2012/08/23/logging-to-logstash-json-format-in-nginx/::
+Example 13: [Raw Json Support](http://blog.pkhamre.com/2012/08/23/logging-to-logstash-json-format-in-nginx/::
 
     beaver --format rawjson
 
-Example 13: Mqtt transport using Mosquitto::
+Example 14: Mqtt transport using Mosquitto::
 
     # /etc/beaver/conf
     [beaver]
@@ -333,7 +358,7 @@ Example 13: Mqtt transport using Mosquitto::
     # From the commandline
     beaver -c /etc/beaver/conf -f /var/log/unmappable.log -t mqtt
 
-Example 14: Sincedb support using and sqlite3 db
+Example 15: Sincedb support using and sqlite3 db
 
 Note that this will require R/W permissions on the file at sincedb path, as Beaver will store the current line for a given filename/file id.::
 
@@ -349,7 +374,7 @@ Note that this will require R/W permissions on the file at sincedb path, as Beav
     # From the commandline
     beaver -c /etc/beaver/conf
 
-Example 15: Loading stanzas from /etc/beaver/conf.d/* support::
+Example 16: Loading stanzas from /etc/beaver/conf.d/* support::
 
     # /etc/beaver/conf
     [beaver]
@@ -367,7 +392,7 @@ Example 15: Loading stanzas from /etc/beaver/conf.d/* support::
     tags: nginx,server
 
     # From the commandline
-    beaver -c /etc/beaver/conf
+    beaver -c /etc/beaver/conf -C /etc/beaver/conf.d
 
 
 As you can see, ``beaver`` is pretty flexible as to how you can use/abuse it in production.
@@ -398,6 +423,13 @@ When using ``copytruncate`` style log rotation, two race conditions can occur:
    watch which may be truncated are generally going to be large enough
    and slow-filling enough that this won't crop up in the wild.
 
+When you get an error similar to ``ImportError: No module named
+_sqlite3`` your python seems to miss the sqlite3-module. This can be the
+case on FreeBSD and probably other systems. If so, use the local package
+manager or port system to build that module. On FreeBSD::
+
+    cd /usr/ports/databases/py-sqlite3
+    sudo make install clean
 
 Credits
 =======
